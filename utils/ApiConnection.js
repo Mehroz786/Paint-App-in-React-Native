@@ -20,7 +20,7 @@ const  ApiConnection = ()=> {
         setLoading(true);
         try{
             
-            const response = await axios.post("http://192.168.1.29:4000/generate_image", 
+            const response = await axios.post("http://192.168.1.29:5000/generate_image", 
             { text: prompt },{responseType:'arraybuffer'}
             );
             console.log("Loading ")
