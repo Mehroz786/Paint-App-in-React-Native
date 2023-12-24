@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { SafeAreaView, View, Dimensions, Image, Button, TouchableOpacity, Text } from 'react-native';
+import { SafeAreaView, View, Dimensions, Image, Button, ActivityIndicator, TouchableOpacity, Text, Modal, TextInput } from 'react-native';
 import Canvas, { Image as CanvasImage } from 'react-native-canvas';
 import ColorPicker from 'react-native-wheel-color-picker';
 
@@ -13,16 +13,23 @@ import Space from '../components/Space';
 // Import the SideMenu
 import SideMenu from '../components/SideMenu';
 
-export default function CanvasRender({ navigation, route }) {
+// Import the Api
+import ApiConnection from '../utils/ApiConnection';
+import { Alert } from 'react-native';
+import Database from '../utils/Database';
+import { DateHandler } from '../utils/DateHandler';
 
-  const {name} = route.params;
+export default function CanvasRender({ navigation, route}) {
+
+  const {name, drawing } = route.params;
+
 
   const viewRef = useRef(null);
   const canvasRef = useRef(null);
   const isDrawingRef = useRef(false);
 
   const [strokeSize, setStrokeSize] = useState(3);
-  const [isShowSketch, setShowSketch] = useState(false);
+  const [isShowSketch, setShowSketch] = useState(drawing && drawing.userEmailr);
   const [color, setColor] = useState('#ff0000');
   const [isShowColorPicker, setShowColorPicker] = useState(false);
   var drawingAllowed = true;
@@ -81,28 +88,29 @@ export default function CanvasRender({ navigation, route }) {
     undoStackImg.current.push(dataUrl);
   }
 
+  const saveDrawing = async ()=>{
+    const dateHandler = new DateHandler()
+    //console.log('saving at: '+dateHandler.getFormatedDateTime())
+    const drawingImage = undoStackImg.current.peek().replace(/"/g, '');
+    drawing.drawingImage = drawingImage;
+    drawing.datetime = dateHandler.getMillis()
+    await Database.saveDrawing(drawing, image_url)
+    alert('drawing saved');
+  }
 
-  const redrawState = (state) => {
-    console.log('redrawing form history')
-    const ctx = canvasRef.current.getContext('2d');
+  const drawImage = (ctx, imgSrc) =>{
     const image = new CanvasImage(canvasRef.current);
-    const imgSrc = state.replace(/"/g, ''); // the string contains quotes by default, therefore remove
     image.src = imgSrc
     image.addEventListener('load', () => {
       ctx.drawImage(image, 0, 0, canvasRef.current.width, canvasRef.current.height);
     });
   }
-
-  // const redrawFromStack = (stack) => {
-  //   stack.current.getItems().forEach((action) => {
-  //     const {path, color, strokeSize} = action;
-  //     for (let i = 0; i < path.length-1; i++) {
-  //       p1 = path[i];
-  //       p2 = path[i+1];
-  //       drawLineOnCanvas({x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, color, strokeSize});
-  //     }
-  //   });    
-  // };
+  const redrawState = (state) => {
+    console.log('redrawing form history')
+    const ctx = canvasRef.current.getContext('2d');
+    const imgSrc = state.replace(/"/g, ''); // the string contains quotes by default, therefore remove
+    drawImage(ctx, imgSrc)
+  }
 
   const handleTouchStart = (event) => {
     if (!drawingAllowed) return;
@@ -120,7 +128,7 @@ export default function CanvasRender({ navigation, route }) {
     const x = event.nativeEvent.locationX;
     const y = event.nativeEvent.locationY;
 
-    console.log(`Touched at coordinates X: ${x}, Y: ${y}`);
+    //console.log(`Touched at coordinates X: ${x}, Y: ${y}`);
 
     const p1 = path[path.length - 1];
     const p2 = { x, y };
@@ -157,8 +165,108 @@ export default function CanvasRender({ navigation, route }) {
 
   }, [width, height]);
 
+  useEffect(()=>{
+    if (drawing && drawing.drawingImage)
+        drawImage(canvasRef.current.getContext('2d'), drawing.drawingImage)
+  },[width])
+
+  // ********* logic of Generating Image*******
+
+
+  // some state 
+  const [isModalVisible, setModalVisible] = useState(false); // for visibility of the Modal
+  const [prompt, setPromt] = useState('') // for prompt
+  const [geneImage, setGenImage] = useState(drawing && drawing.userEmail? drawing.userEmail: '')
+  const [apiImage, setApiImage] = useState('')
+  const { loading, image_url, error, generate_images } = ApiConnection();
+
+  // function to generate the image
+  const genImage = () => {
+    if (prompt == "") {
+      Alert.alert("Prompt can not be Empty")
+    } else {
+      generate_images(prompt) // passing the prompt
+      setPromt('')
+    }
+
+  }
+
+  useEffect(() => {
+    setApiImage(image_url);
+  }, [image_url]);
+
+  // useEffect(()=>{
+  //   if (drawing && drawing.userEmail)
+  //     set
+  // }, [])
+
+
+  // function to move back
+  const moveBack = () => {
+
+    // const ctx = canvasRef.current.getContext('2d');
+    // drawImage(ctx, image_url)
+    setGenImage(image_url)
+    //drawing.sketchImage = image_url
+    setModalVisible(false)
+    console.log('set \n', geneImage.length)
+    setPromt('')
+    setShowSketch(true)
+    setApiImage('')
+    //alert('moveback called')
+  }
+
+  const cross = () => {
+    setModalVisible(false);
+    setApiImage('')
+    setPromt('')
+  }
+
+
+  // ********* end of Generating Image Logic ******
+
+
   return (
     <SafeAreaView style={[styles.container]}>
+      <Modal
+        animationType='slide'
+        transparent={true}
+        visible={isModalVisible}
+        onRequestClose={() => setModalVisible(false)}>
+
+        <View style={[styles.container, styles.absolute, styles.fullscreen, styles.center]}>
+          <View style={[styles.modal, styles.card, styles.cardShadow]}>
+
+            <TouchableOpacity onPress={cross} style={[styles.button, { marginLeft: '90%' }]}>
+              <Text style={{ fontSize: 15, fontWeight: 'bold' }}>❌</Text>
+            </TouchableOpacity>
+
+            <TextInput
+              placeholder='Enter Prompt'
+              style={styles.prompt}
+              value={prompt}
+              onChangeText={setPromt}
+            />
+            <View style={{ flexDirection: 'column', width: "95%", alignItems: 'center' }}>
+              <TouchableOpacity onPress={genImage} style={[styles.menuButton, { marginTop: 5, width: '80%' }]}>
+                <Text style={{ textAlign: 'center' }}>Generate Image🪄</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={apiImage ? moveBack : null}
+                disabled={apiImage ? false : true}  // diabled the move to canvas when image is not generated
+                style={[styles.menuButton, { marginTop: 5, width: '80%', backgroundColor: apiImage ? "lightblue" : '#c4d4e3' }]}>
+                <Text style={{ textAlign: 'center' }}>Move Image to Canvas</Text>
+              </TouchableOpacity>
+
+            </View>
+            {apiImage && <Image source={{ uri: apiImage }} style={{ width: "70%", height: '50%', marginTop: 10 }} />}
+            {loading && <ActivityIndicator style={{ marginTop: 20, color: 'white' }} />}
+            {error && <Text>Error: {error.message}</Text>}
+          </View>
+        </View>
+
+
+      </Modal>
+
 
       <View
         ref={viewRef}
@@ -168,16 +276,20 @@ export default function CanvasRender({ navigation, route }) {
         onTouchEnd={handleTouchEnd}
       >
         {
-          isShowSketch ? <Image
-            source={require('../car_sketch.jpg')} // Replace with your image file path
-            style={{ width: '100%', height: '100%', position: 'absolute', opacity: 0.3 }}
-          /> : ''
+          isShowSketch ? 
+          <View style={[styles.container, styles.center]}>
+            <Image
+            source={{ uri: geneImage }} // Replace with your image file path
+            style={styles.absCenter}
+          />
+          </View>
+           : ''
         }
         <Canvas
-            style={[styles.canvasDefault, { marginTop: 0 }]}
-            ref={canvasRef}
-          />
-        
+          style={[styles.canvasDefault, { marginTop: 0 }]}
+          ref={canvasRef}
+        />
+
       </View>
 
       {
@@ -204,28 +316,19 @@ export default function CanvasRender({ navigation, route }) {
       </View>
 
       <View style={[styles.container, styles.absolute, styles.fullscreen]}>
-        <View style={[styles.center, styles.center, styles.horizontal, {
-            paddingHorizontal: 25,
-            backgroundColor: "#427D9D",
-            paddingBottom: 10,
-            paddingTop: 30,
-            borderBottomLeftRadius: 25,
-            borderBottomRightRadius: 25,
-          },]}>
+        <View style = {[styles.primaryTopbar, styles.center]}>
+        <View style={[styles.center, styles.center, styles.horizontal]}>
           <SideMenu
+            style={[styles.menuButton, {marginTop: 0, height: 'auto'}]}
             navigation={navigation}
             username={name}
             onOpen={() => { drawingAllowed = false }}
             onClose={() => { drawingAllowed = true }}
             btnList={[
-              { text: 'save', onPress: () => { saveCanvas() } },
+              { text: 'save', onPress: () => { saveDrawing() } },
               { text: 'clear', onPress: () => { clearCanvas(); undoStackImg.current.clear(); redoStackImg.current.clear(); } },
-              { text: 'AI Sketch', onPress: () => { setShowSketch(!isShowSketch) } },
+              { text: 'AI Sketch', onPress: () => { setModalVisible(true) } }
             ]}
-          // onclear={()=>{clearCanvas();undoStack.current.clear()}}
-          // onsave={()=>{
-          //   saveCanvas();
-          // }}
           />
           <View style={[styles.center]}>
             <Text style={{ color: 'black' }}>size: {strokeSize.toFixed(1)}</Text>
@@ -250,6 +353,10 @@ export default function CanvasRender({ navigation, route }) {
             size={40}
             onPress={() => { setShowColorPicker(true); }}
           />
+        </View>
+        <View>
+          <Text style={{color: 'white'}}>{drawing.title} 🖋</Text>
+        </View>
         </View>
       </View>
 
